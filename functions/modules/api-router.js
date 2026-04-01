@@ -48,7 +48,8 @@ import {
     handleVpsNetworkTargetsRequest,
     handleVpsNetworkCheck,
     handleVpsConfig,
-    handleVpsPublicNodeDetailRequest
+    handleVpsPublicNodeDetailRequest,
+    handleVpsCleanup
 } from './handlers/vps-monitor-handler.js';
 
 // 常量定义
@@ -412,6 +413,9 @@ export async function handleApiRequest(request, env) {
 
         case '/vps/alerts':
             return await handleVpsAlertsRequest(request, env);
+
+        case '/vps/cleanup':
+            return await handleVpsCleanup(request, env);
 
         case '/settings':
             if (request.method === 'GET') {
