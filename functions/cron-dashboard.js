@@ -92,13 +92,22 @@ function getCronDashboard(env) {
                 const response = await fetch('/api/cron/status');
                 const data = await response.json();
 
-                document.getElementById('totalSubs').textContent = data.totalSubscriptions || 0;
-                document.getElementById('successCount').textContent = data.successfulSyncs || 0;
-                document.getElementById('failedCount').textContent = data.failedSyncs || 0;
-                document.getElementById('lastSync').textContent = data.lastSync ?
-                    new Date(data.lastSync).toLocaleString() : '从未';
+                // 兼容性：支持从 lastExecution 中读取字段
+                const status = {
+                    totalSubscriptions: data.totalSubscriptions || data.lastExecution?.result?.totalSubscriptions || 0,
+                    successfulSyncs: data.successfulSyncs || data.lastExecution?.result?.successfulSyncs || 0,
+                    failedSyncs: data.failedSyncs || data.lastExecution?.result?.failedSyncs || 0,
+                    lastSync: data.lastSync || data.lastExecution?.timestamp || null,
+                    details: data.details || data.lastExecution?.result?.details || []
+                };
 
-                updateLogs(data.details || []);
+                document.getElementById('totalSubs').textContent = status.totalSubscriptions;
+                document.getElementById('successCount').textContent = status.successfulSyncs;
+                document.getElementById('failedCount').textContent = status.failedSyncs;
+                document.getElementById('lastSync').textContent = status.lastSync ?
+                    new Date(status.lastSync).toLocaleString() : '从未';
+
+                updateLogs(status.details);
             } catch (error) {
                 console.error('Failed to load status:', error);
             }

@@ -377,7 +377,7 @@ import SavePrompt from '../../ui/SavePrompt.vue';
           @edit="(id) => handleEditSubscription(subscriptions.find(s => s.id === id))"
           @toggle-sort="isSortingSubs = !isSortingSubs" @mark-dirty="markDirty" @delete-all="showDeleteSubsModal = true"
           @preview="handlePreviewSubscription" @reorder="reorderSubscriptions" 
-          @qrcode="(id) => handleQRCode(id, 'subscription')" />
+          @qrcode="(id) => handleQRCode(id, 'subscription')" @import="showBulkImportModal = true" />
 
         <!-- Manual Node Panel -->
         <ManualNodePanel :manual-nodes="manualNodes" :paginated-manual-nodes="paginatedManualNodes"

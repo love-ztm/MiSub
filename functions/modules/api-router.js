@@ -4,6 +4,7 @@
  */
 
 import { StorageFactory, DataMigrator } from '../storage-adapter.js';
+import { KV_KEY_SUBS } from './config.js';
 import { createJsonResponse, createErrorResponse, getAuthDebugInfo } from './utils.js';
 import { authMiddleware, handleLogin, handleLogout, getAuthSessionDiagnostic, getLoginPasswordDiagnostic } from './auth-middleware.js';
 import { handleDataRequest, handleMisubsSave, handleSettingsGet, handleSettingsSave, handlePublicProfilesRequest, handlePublicConfig, handleUpdatePassword } from './api-handler.js';
@@ -52,7 +53,6 @@ import {
 
 // 常量定义
 const OLD_KV_KEY = 'misub_data_v1';
-const KV_KEY_SUBS = 'misub_subscriptions_v1';
 const KV_KEY_PROFILES = 'misub_profiles_v1'; // Ensure this is defined if used
 
 /**
@@ -617,7 +617,7 @@ async function handleCronStatusRequest(env) {
             console.warn('[Cron Status] Failed to fetch last execution:', error);
         }
 
-        return createJsonResponse({
+        const statusData = {
             enabled: enableCron,
             config: {
                 type: cronType,
@@ -625,9 +625,16 @@ async function handleCronStatusRequest(env) {
                 syncTimeout,
                 enableParallel
             },
+            totalSubscriptions: lastExecution?.result?.totalSubscriptions || 0,
+            successfulSyncs: lastExecution?.result?.successfulSyncs || 0,
+            failedSyncs: lastExecution?.result?.failedSyncs || 0,
+            lastSync: lastExecution?.timestamp || null,
+            details: lastExecution?.result?.details || [],
             lastExecution,
             timestamp: new Date().toISOString()
-        });
+        };
+
+        return createJsonResponse(statusData);
 
     } catch (error) {
         console.error('[Cron Status Error]', error);
@@ -657,8 +664,9 @@ async function handleCronTriggerRequest(env) {
         const syncTimeout = parseInt(env.CRON_SYNC_TIMEOUT) || 30000;
         const enableParallel = env.CRON_ENABLE_PARALLEL !== 'false';
 
-        // 执行订阅同步
-        const result = await performSubscriptionSync(env, {
+        // 调用 _schedule.js 中的同步逻辑
+        const scheduleModule = await import('../_schedule.js');
+        const result = await scheduleModule.performSubscriptionSync(env, {
             maxSyncCount,
             syncTimeout,
             enableParallel
@@ -773,7 +781,7 @@ async function performSubscriptionSync(env, config) {
 async function getAllSubscriptions(env) {
     try {
         const storageAdapter = StorageFactory.createAdapter(env, await StorageFactory.getStorageType(env));
-        const subscriptions = await storageAdapter.get('subscriptions') || [];
+        const subscriptions = await storageAdapter.get(KV_KEY_SUBS) || [];
         return Array.isArray(subscriptions) ? subscriptions : [];
     } catch (error) {
         console.error('[Cron] Failed to fetch subscriptions:', error);

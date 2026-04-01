@@ -27,13 +27,24 @@ export async function onRequest(context) {
 /**
  * 执行订阅同步
  */
-async function performSubscriptionSync(env) {
+export async function performSubscriptionSync(env, config = {}) {
+    const {
+        maxSyncCount = 50,
+        timeout = 30000,
+        concurrency = 5
+    } = config;
+
     const results = {
         timestamp: new Date().toISOString(),
         totalSubscriptions: 0,
         successfulSyncs: 0,
         failedSyncs: 0,
-        details: []
+        details: [],
+        config: {
+            maxSyncCount,
+            timeout,
+            concurrency
+        }
     };
 
     try {
@@ -43,10 +54,10 @@ async function performSubscriptionSync(env) {
         results.totalSubscriptions = subscriptions.length;
 
         // 并发执行同步，但限制并发数
-        const BATCH_SIZE = 5;
+        const BATCH_SIZE = concurrency;
         for (let i = 0; i < subscriptions.length; i += BATCH_SIZE) {
             const batch = subscriptions.slice(i, i + BATCH_SIZE);
-            const batchPromises = batch.map(sub => syncSingleSubscription(sub, env));
+            const batchPromises = batch.map(sub => syncSingleSubscription(sub, env, timeout));
 
             const batchResults = await Promise.allSettled(batchPromises);
 
