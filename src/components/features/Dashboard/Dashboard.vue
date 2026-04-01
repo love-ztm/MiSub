@@ -35,6 +35,7 @@ const NodePreviewModal = defineAsyncComponent(() => import('../../modals/NodePre
 
 const BatchGroupModal = defineAsyncComponent(() => import('../../modals/BatchGroupModal.vue'));
 const QRCodeModal = defineAsyncComponent(() => import('../../modals/QRCodeModal.vue'));
+const CopyLinkModal = defineAsyncComponent(() => import('../../modals/CopyLinkModal.vue'));
 
 // --- 基礎 Props 和狀態 ---
 const props = defineProps({ data: Object });
@@ -65,6 +66,8 @@ const manualNodeViewMode = ref('card');
 const showQRCodeModal = ref(false);
 const qrCodeUrl = ref('');
 const qrCodeTitle = ref('');
+const showCopyModal = ref(false);
+const showCopyModalProfile = ref(null);
 
 const handleQRCode = (id, type = 'subscription') => {
   if (type === 'subscription') {
@@ -89,6 +92,14 @@ const handleQRCode = (id, type = 'subscription') => {
       qrCodeTitle.value = profile.name || '订阅组二维码';
       showQRCodeModal.value = true;
     }
+  }
+};
+
+const handleOpenCopy = (profileId) => {
+  const profile = profiles.value.find(p => p.id === profileId || p.customId === profileId);
+  if (profile) {
+    showCopyModalProfile.value = profile;
+    showCopyModal.value = true;
   }
 };
 
@@ -149,6 +160,7 @@ const showDeleteSubsModal = ref(false);
 const showDeleteNodesModal = ref(false);
 const showSubscriptionImportModal = ref(false);
 const showLogModal = ref(false);
+const logProfileName = ref('');
 const showBatchDeleteModal = ref(false);
 const batchDeleteIds = ref([]);
 const showDedupModal = ref(false);
@@ -331,6 +343,14 @@ const handlePreviewProfile = (profileId) => {
   }
 };
 
+const handleViewLogs = (profileId) => {
+  const profile = profiles.value.find(p => p.id === profileId || p.customId === profileId);
+  if (profile) {
+    logProfileName.value = profile.name;
+    showLogModal.value = true;
+  }
+};
+
 const handleProfileReorder = (fromIndex, toIndex) => {
   // 使用 splice 方法保持响应性,而不是直接赋值
   const [item] = profiles.value.splice(fromIndex, 1);
@@ -401,7 +421,7 @@ import SavePrompt from '../../ui/SavePrompt.vue';
         <RightPanel :config="config" :profiles="profiles" @qrcode="(url, title) => { qrCodeUrl = url; qrCodeTitle = title; showQRCodeModal = true; }" />
         <ProfilePanel :profiles="profiles" @add="handleAddProfile" @edit="handleEditProfile"
           @delete="handleDeleteProfile" @deleteAll="showDeleteProfilesModal = true" @toggle="handleProfileToggle"
-          @copyLink="copyProfileLink" @copyClashLink="copyClashLink" @preview="handlePreviewProfile" @reorder="handleProfileReorder" 
+          @open-copy="handleOpenCopy" @copyLink="copyProfileLink" @copyClashLink="copyClashLink" @preview="handlePreviewProfile" @viewLogs="handleViewLogs" @reorder="handleProfileReorder" 
           @qrcode="(id) => handleQRCode(id, 'profile')" />
       </div>
     </div>
@@ -461,6 +481,13 @@ import SavePrompt from '../../ui/SavePrompt.vue';
     v-model:show="showQRCodeModal" 
     :url="qrCodeUrl" 
     :title="qrCodeTitle" 
+  />
+
+  <CopyLinkModal 
+    v-if="showCopyModal && showCopyModalProfile" 
+    v-model:show="showCopyModal" 
+    :profile="showCopyModalProfile" 
+    :token="settings?.profileToken" 
   />
 </template>
 
