@@ -10,6 +10,11 @@ import { KV_KEY_SETTINGS, DEFAULT_SETTINGS } from '../config.js';
 
 const REPORTS_MAX_KEEP = 5000;
 const ALERTS_MAX_KEEP = 1000;
+const PUBLIC_SNAPSHOT_CACHE_KEY = 'misub_vps_public_snapshot';
+const PUBLIC_NODE_DETAIL_CACHE_KEY_PREFIX = 'misub_vps_public_node_detail:';
+const PUBLIC_CACHE_TTL_SECONDS = 60;
+const REPORT_PRUNE_CACHE_KEY = 'misub_vps_prune_last_ms';
+const REPORT_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 async function getStorageAdapter(env) {
     return StorageFactory.createAdapter(env, STORAGE_TYPES.D1);
@@ -36,6 +41,76 @@ function ensureD1StorageMode(settings, env) {
 
 function getD1(env) {
     return env.MISUB_DB;
+}
+
+function getKv(env) {
+    return StorageFactory.resolveKV(env);
+}
+
+async function readJsonCache(env, key) {
+    const kv = getKv(env);
+    if (!kv) return null;
+    try {
+        const raw = await kv.get(key);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (error) {
+        console.warn('[VPS Monitor] KV cache read failed:', error?.message || error);
+        return null;
+    }
+}
+
+async function writeJsonCache(env, key, value, ttl = PUBLIC_CACHE_TTL_SECONDS) {
+    const kv = getKv(env);
+    if (!kv) return false;
+    try {
+        await kv.put(key, JSON.stringify(value), { expirationTtl: ttl });
+        return true;
+    } catch (error) {
+        console.warn('[VPS Monitor] KV cache write failed:', error?.message || error);
+        return false;
+    }
+}
+
+async function deleteJsonCache(env, key) {
+    const kv = getKv(env);
+    if (!kv) return false;
+    try {
+        await kv.delete(key);
+        return true;
+    } catch (error) {
+        console.warn('[VPS Monitor] KV cache delete failed:', error?.message || error);
+        return false;
+    }
+}
+
+async function invalidatePublicCaches(env, nodeId = null) {
+    await deleteJsonCache(env, PUBLIC_SNAPSHOT_CACHE_KEY);
+    if (nodeId) {
+        await deleteJsonCache(env, PUBLIC_NODE_DETAIL_CACHE_KEY_PREFIX + nodeId);
+    }
+}
+
+async function maybePruneReports(db, settings, env) {
+    const kv = getKv(env);
+    if (!kv) return;
+
+    try {
+        const lastPruneStr = await kv.get(REPORT_PRUNE_CACHE_KEY);
+        const lastPruneMs = lastPruneStr ? Number(lastPruneStr) : 0;
+        if (Number.isFinite(lastPruneMs) && (Date.now() - lastPruneMs) < REPORT_PRUNE_INTERVAL_MS) {
+            return;
+        }
+    } catch (error) {
+        console.warn('[VPS Monitor] report prune cache unavailable, skipping interval check');
+    }
+
+    try {
+        await pruneAllReportsAndSamples(db, settings);
+        await kv.put(REPORT_PRUNE_CACHE_KEY, String(Date.now()), { expirationTtl: Math.ceil(REPORT_PRUNE_INTERVAL_MS / 1000) });
+    } catch (error) {
+        console.warn('[VPS Monitor] report prune failed:', error?.message || error);
+    }
 }
 
 function nowIso() {
@@ -1552,6 +1627,8 @@ export async function handleVpsReport(request, env) {
         updated_at: updatedAt
     });
 
+    await invalidatePublicCaches(env, node.id);
+    await maybePruneReports(db, settings, env);
     return createJsonResponse({ success: true });
 }
 
@@ -1598,6 +1675,7 @@ export async function handleVpsNodesRequest(request, env) {
             overloadState: null
         };
         await insertNode(db, node);
+        await invalidatePublicCaches(env, node.id);
 
         return createJsonResponse({ success: true, data: node, guide: buildPublicGuide(env, request, node) });
     }
@@ -1629,6 +1707,11 @@ export async function handleVpsPublicSnapshotRequest(request, env) {
         headerEnabled: settings?.vpsMonitor?.publicPageShowHeader !== false,
         footerEnabled: settings?.vpsMonitor?.publicPageShowFooter !== false
     };
+
+    const cached = await readJsonCache(env, PUBLIC_SNAPSHOT_CACHE_KEY);
+    if (cached) {
+        return createJsonResponse(cached);
+    }
 
     const db = getD1(env);
     const nodes = await fetchNodes(db);
@@ -1683,31 +1766,37 @@ export async function handleVpsPublicSnapshotRequest(request, env) {
         return summary;
     });
 
-    return createJsonResponse({
+    const responseBody = {
         success: true,
         data,
         theme: buildPublicThemeConfig(settings),
         layout
-    });
+    };
+    await writeJsonCache(env, PUBLIC_SNAPSHOT_CACHE_KEY, responseBody);
+    return createJsonResponse(responseBody);
 }
 
 async function fetchLatestNetworkSamplesBatch(db, nodeIds) {
     if (!nodeIds.length) return [];
     const placeholders = nodeIds.map(() => '?').join(',');
-    const sql = `SELECT node_id, data, reported_at FROM vps_network_samples WHERE node_id IN (${placeholders}) ORDER BY reported_at DESC`;
+    const sql = `
+        SELECT samples.node_id, samples.data, samples.reported_at
+        FROM vps_network_samples AS samples
+        INNER JOIN (
+            SELECT node_id, MAX(reported_at) AS latest_reported_at
+            FROM vps_network_samples
+            WHERE node_id IN (${placeholders})
+            GROUP BY node_id
+        ) AS latest
+        ON samples.node_id = latest.node_id AND samples.reported_at = latest.latest_reported_at
+        ORDER BY samples.node_id
+    `;
     const { results } = await db.prepare(sql).bind(...nodeIds).all();
-    
-    const latestMap = new Map();
-    for (const row of results) {
-        if (!latestMap.has(row.node_id)) {
-            latestMap.set(row.node_id, {
-                nodeId: row.node_id,
-                checks: row.data ? JSON.parse(row.data).checks : [],
-                reportedAt: row.reported_at
-            });
-        }
-    }
-    return Array.from(latestMap.values());
+    return (results || []).map(row => ({
+        nodeId: row.node_id,
+        checks: row.data ? JSON.parse(row.data).checks : [],
+        reportedAt: row.reported_at
+    }));
 }
 
 export async function handleVpsPublicNodeDetailRequest(request, env) {
@@ -1736,6 +1825,11 @@ export async function handleVpsPublicNodeDetailRequest(request, env) {
     }
     if (!nodeId) {
         return createErrorResponse('Node id required', 400);
+    }
+
+    const cached = await readJsonCache(env, PUBLIC_NODE_DETAIL_CACHE_KEY_PREFIX + nodeId);
+    if (cached) {
+        return createJsonResponse(cached);
     }
 
     const db = getD1(env);
@@ -1767,7 +1861,7 @@ export async function handleVpsPublicNodeDetailRequest(request, env) {
         if (summary.latest.ip) delete summary.latest.ip;
     }
 
-    return createJsonResponse({
+    const responseBody = {
         success: true,
         data: summary,
         networkSamples: samples,
@@ -1775,7 +1869,9 @@ export async function handleVpsPublicNodeDetailRequest(request, env) {
             headerEnabled: settings?.vpsMonitor?.publicPageShowHeader !== false,
             footerEnabled: settings?.vpsMonitor?.publicPageShowFooter !== false
         }
-    });
+    };
+    await writeJsonCache(env, PUBLIC_NODE_DETAIL_CACHE_KEY_PREFIX + nodeId, responseBody);
+    return createJsonResponse(responseBody);
 }
 
 export async function handleVpsNodeDetailRequest(request, env) {
@@ -1850,11 +1946,13 @@ export async function handleVpsNodeDetailRequest(request, env) {
         }
         node.updatedAt = nowIso();
         await updateNode(db, node);
+        await invalidatePublicCaches(env, node.id);
         return createJsonResponse({ success: true, data: node, guide: buildPublicGuide(env, request, node) });
     }
 
     if (request.method === 'DELETE') {
         await deleteNode(db, nodeId);
+        await invalidatePublicCaches(env, nodeId);
         return createJsonResponse({ success: true, data: node });
     }
 
@@ -1927,6 +2025,7 @@ export async function handleVpsNetworkTargetsRequest(request, env) {
             return createErrorResponse(`目标数量超过上限（${limit}）`, 400);
         }
         const target = await insertNetworkTarget(db, nodeId, payload);
+        await invalidatePublicCaches(env, nodeId);
         return createJsonResponse({ success: true, data: target });
     }
 
@@ -1952,6 +2051,7 @@ export async function handleVpsNetworkTargetsRequest(request, env) {
         if (!updated) {
             return createErrorResponse('Target not found', 404);
         }
+        await invalidatePublicCaches(env);
         return createJsonResponse({ success: true, data: updated });
     }
 
@@ -1962,6 +2062,7 @@ export async function handleVpsNetworkTargetsRequest(request, env) {
             return createErrorResponse('Target id required', 400);
         }
         await deleteNetworkTarget(db, targetId);
+        await invalidatePublicCaches(env);
         return createJsonResponse({ success: true });
     }
 
@@ -2048,6 +2149,7 @@ export async function handleVpsCleanup(request, env) {
 
     const db = getD1(env);
     await pruneAllReportsAndSamples(db, settings);
+    await invalidatePublicCaches(env);
 
     return createJsonResponse({ success: true, message: 'Cleanup completed' });
 }
