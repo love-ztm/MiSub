@@ -1,5 +1,5 @@
 import { StorageFactory } from '../../storage-adapter.js';
-import { migrateConfigSettings, formatBytes, migrateProfileIds } from '../utils.js';
+import { migrateConfigSettings, formatBytes, migrateProfileIds, base64EncodeUtf8 } from '../utils.js';
 import { generateCombinedNodeList } from '../../services/subscription-service.js';
 import { sendEnhancedTgNotification } from '../notifications.js';
 import { KV_KEY_SUBS, KV_KEY_PROFILES, KV_KEY_SETTINGS, DEFAULT_SETTINGS as defaultSettings } from '../config.js';
@@ -50,6 +50,21 @@ function extractProxySectionFromBuiltin(content, targetFormat) {
             .map(line => line.trim())
             .filter(line => line && !/^DIRECT\s*=\s*direct$/i.test(line))
             .join('\n');
+    }
+
+    if (targetFormat === 'singbox' || targetFormat === 'sing-box') {
+        try {
+            const config = JSON.parse(content);
+            if (config.outbounds && Array.isArray(config.outbounds)) {
+                // 过滤掉 direct, block, dns-out 等元 outbound
+                const proxies = config.outbounds.filter(o => 
+                    o.type !== 'direct' && o.type !== 'block' && o.type !== 'dns'
+                );
+                return JSON.stringify(proxies, null, 2);
+            }
+        } catch {
+            return '';
+        }
     }
 
     return '';
@@ -114,7 +129,15 @@ export async function handleMisubRequest(context) {
     const config = migrateConfigSettings({ ...defaultSettings, ...settings });
     context.accessLogPersistenceMode = config.accessLogPersistenceMode || 'light';
 
-
+    // [Subconverter API] 提取 URL 控制参数，用于覆盖默认设置
+    const urlInclude = url.searchParams.get('include');
+    const urlExclude = url.searchParams.get('exclude');
+    const urlRename = url.searchParams.get('rename');
+    const urlEmoji = url.searchParams.get('emoji'); // true/false
+    const urlUdp = url.searchParams.get('udp');     // true/false
+    const urlTfo = url.searchParams.get('tfo');     // true/false
+    const urlScv = url.searchParams.get('scv');     // true/false (skip-cert-verify)
+    const urlList = url.searchParams.get('list') === 'true';
 
     const isBrowser = isBrowserAgent(userAgentHeader);
 
@@ -368,13 +391,44 @@ export async function handleMisubRequest(context) {
 
         const generationSettings = {
             ...effectivePrefixSettings,
-            nodeTransform: effectiveNodeTransform,
+            nodeTransform: { ...effectiveNodeTransform },
             name: subName,
-            // [修复] 显式传递订阅组级别的操作符和过滤规则
-            operators: activeProfile?.operators,
-            exclude: activeProfile?.exclude,
-            include: activeProfile?.include
+            operators: Array.isArray(activeProfile?.operators) ? [...activeProfile.operators] : [],
+            exclude: urlExclude || activeProfile?.exclude,
+            include: urlInclude || activeProfile?.include
         };
+
+        // [Subconverter API] 动态注入更名算子 (rename=old@new|A@B)
+        if (urlRename) {
+            const renameGroups = urlRename.split('|');
+            renameGroups.forEach(group => {
+                const [regex, replace] = group.split('@');
+                if (regex) {
+                    generationSettings.operators.push({
+                        type: 'rename',
+                        enabled: true,
+                        params: {
+                            regex: {
+                                enabled: true,
+                                rules: [{
+                                    pattern: regex,
+                                    replacement: replace || '',
+                                    flags: 'gi'
+                                }]
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // [Subconverter API] 控制 Emoji 注入
+        if (urlEmoji === 'false') {
+            generationSettings.nodeTransform.addFlagEmoji = false;
+            generationSettings.nodeTransform.removeFlagEmoji = true;
+        } else if (urlEmoji === 'true') {
+            generationSettings.nodeTransform.addFlagEmoji = true;
+        }
 
         const freshNodes = await generateCombinedNodeList(
             context, // 传入完整 context
@@ -412,7 +466,7 @@ export async function handleMisubRequest(context) {
     // 1. If 'nodes' format requested, return Base64 nodes directly (DataSource for external converters)
     if (targetFormat === 'nodes') {
         const contentToEncode = isProfileExpired ? (DEFAULT_EXPIRED_NODE + '\n') : combinedNodeList;
-        return new Response(btoa(unescape(encodeURIComponent(contentToEncode))), { 
+        return new Response(base64EncodeUtf8(contentToEncode), { 
             headers: { 
                 "Content-Type": "text/plain; charset=utf-8", 
                 'Cache-Control': 'no-store, no-cache',
@@ -499,16 +553,22 @@ export async function handleMisubRequest(context) {
             }
         }
 
-        return new Response(btoa(unescape(encodeURIComponent(contentToEncode))), { headers });
+        return new Response(base64EncodeUtf8(contentToEncode), { headers });
     }
 
+
+    // [Subconverter API] URL 参数优先级高于全局/Profile 设置
+    const finalSkipCertVerify = urlScv !== null ? (urlScv === 'true' || urlScv === '1') : shouldSkipCertificateVerify;
+    const finalEnableUdp = urlUdp !== null ? (urlUdp === 'true' || urlUdp === '1') : shouldEnableUdp;
+    const finalEnableTfo = urlTfo === 'true' || urlTfo === '1';
 
     const builtinOptions = {
         fileName: subName,
         managedConfigUrl: '',
         interval: config.UpdateInterval || 86400,
-        skipCertVerify: shouldSkipCertificateVerify,
-        enableUdp: shouldEnableUdp,
+        skipCertVerify: finalSkipCertVerify,
+        enableUdp: finalEnableUdp,
+        enableTfo: finalEnableTfo,
         ruleLevel: ruleLevel // 统一后的规则等级
     };
 
@@ -542,7 +602,7 @@ export async function handleMisubRequest(context) {
                 ? `upload=${totalUserInfo.upload}; download=${totalUserInfo.download}; total=${totalUserInfo.total}; expire=${totalUserInfo.expire}`
                 : null;
 
-            const { content: finalContent, contentType, headers: resultHeaders } = await ProcessorService.renderOutput({
+            let { content: finalContent, contentType, headers: resultHeaders } = await ProcessorService.renderOutput({
                 targetFormat,
                 combinedNodeList,
                 subName,
@@ -553,6 +613,15 @@ export async function handleMisubRequest(context) {
                 storageAdapter,
                 userInfoHeader
             });
+
+            // [Subconverter API] 处理 list=true 逻辑：仅输出节点片段
+            if (urlList) {
+                const extracted = extractProxySectionFromBuiltin(finalContent, targetFormat);
+                if (extracted) {
+                    finalContent = extracted;
+                    contentType = 'text/plain; charset=utf-8';
+                }
+            }
 
             const isJson = targetFormat === 'singbox' || targetFormat === 'sing-box';
             const responseHeaders = new Headers({
@@ -612,5 +681,5 @@ export async function handleMisubRequest(context) {
         base64Headers[key] = value;
     });
 
-    return new Response(btoa(unescape(encodeURIComponent(combinedNodeList))), { headers: base64Headers });
+    return new Response(base64EncodeUtf8(combinedNodeList), { headers: base64Headers });
 }

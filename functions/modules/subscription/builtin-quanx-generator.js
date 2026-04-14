@@ -3,7 +3,7 @@
  * 输出格式对齐项目中的 Quantumult X parser，确保可解析回节点 URL。
  */
 
-import { urlToClashProxy } from '../../utils/url-to-clash.js';
+import { urlToClashProxy, urlsToClashProxies } from '../../utils/url-to-clash.js';
 import { getUniqueName } from './name-utils.js';
 import { POLICY_GROUPS, getBuiltinRules, getRemoteProviderDefinitions, DEFAULT_SELECT_GROUP, DEFAULT_RELAY_GROUP, pruneProxyGroups } from './builtin-rules-provider.js';
 
@@ -65,6 +65,7 @@ function buildQxLine(proxy) {
             if (proxy['obfs-host']) extraParts.push(`obfs-host=${proxy['obfs-host']}`);
         }
         if (proxy.udp) extraParts.push('udp-relay=true');
+        if (proxy.tfo) extraParts.push('fast-open=true');
         return `shadowsocks=${server}:${port}, method=${method}, password=${password}${extraParts.length > 0 ? `, ${extraParts.join(', ')}` : ''}, tag=${name}`;
     }
 
@@ -81,6 +82,7 @@ function buildQxLine(proxy) {
         }
         if (proxy.tls || proxy.sni || proxy.servername) extraParts.push('over-tls=true');
         if (proxy.sni || proxy.servername) extraParts.push(`tls-host=${proxy.sni || proxy.servername}`);
+        if (proxy.tfo) extraParts.push('fast-open=true');
         appendQxTlsParams(extraParts, proxy);
         return `vmess=${server}:${port}, method=${method}, password=${uuid}, tag=${name}${extraParts.length > 0 ? `, ${extraParts.join(', ')}` : ''}`;
     }
@@ -97,6 +99,8 @@ function buildQxLine(proxy) {
             extraParts.push('over-tls=true');
         }
         if (proxy.sni || proxy.servername) extraParts.push(`tls-host=${proxy.sni || proxy.servername}`);
+        if (proxy.obfs) extraParts.push(`obfs=${proxy.obfs}, obfs-host=${proxy['obfs-host'] || ''}`);
+        if (proxy.tfo) extraParts.push('fast-open=true');
         appendQxTlsParams(extraParts, proxy);
         return `trojan=${server}:${port}, password=${password}${extraParts.length > 0 ? `, ${extraParts.join(', ')}` : ''}, tag=${name}`;
     }
@@ -181,7 +185,7 @@ function buildQxLine(proxy) {
             extraParts.push(`alpn=${alpn}`);
         }
         appendQxTlsParams(extraParts, proxy);
-        return `anytls=${server}:${port}, ${extraParts.join(', ')}, tag=${name}`;
+        return `anytls=${server}:${port}, ${extraParts.join(', ')}${proxy.tfo ? ', fast-open=true' : ''}, tag=${name}`;
     }
 
     return null;
@@ -193,6 +197,7 @@ export function generateBuiltinQuanxConfig(nodeList, options = {}) {
         interval = 86400,
         skipCertVerify = false,
         enableUdp = false,
+        enableTfo = false,
         ruleLevel = 'std'
     } = options;
 
@@ -206,13 +211,10 @@ export function generateBuiltinQuanxConfig(nodeList, options = {}) {
     const proxiesWithMetadata = [];
     const usedNames = new Map();
 
-    for (const url of nodeUrls) {
-        const clashProxy = urlToClashProxy(url);
-        if (!clashProxy) continue;
+    // 转换为 Clash 代理对象
+    const proxies = urlsToClashProxies(nodeUrls, options);
 
-        if (skipCertVerify) clashProxy['skip-cert-verify'] = true;
-        if (enableUdp) clashProxy.udp = true;
-
+    for (const clashProxy of proxies) {
         const baseName = sanitizeNodeName(clashProxy.name);
         clashProxy.name = getUniqueName(baseName, usedNames);
 

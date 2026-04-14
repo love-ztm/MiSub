@@ -7,7 +7,7 @@
  * 注意：Surge 不支持 VLESS 协议，VLESS 节点会被跳过
  */
 
-import { urlToClashProxy } from '../../utils/url-to-clash.js';
+import { urlToClashProxy, urlsToClashProxies } from '../../utils/url-to-clash.js';
 import { getUniqueName } from './name-utils.js';
 import { POLICY_GROUPS, getBuiltinRules, getRemoteProviderDefinitions, DEFAULT_SELECT_GROUP, DEFAULT_RELAY_GROUP, pruneProxyGroups } from './builtin-rules-provider.js';
 
@@ -283,6 +283,15 @@ function clashProxyToSurgeResult(proxy) {
         if (proxy['shadow-tls-version']) parts.push(`shadow-tls-version=${proxy['shadow-tls-version']}`);
     }
 
+    // TCP Fast Open
+    if (proxy.tfo) {
+        // 大多数协议在 Surge 中支持 tfo=true
+        // 注意：Snell 已经在上面单独处理过了，这里加一个判断避免重复
+        if (type !== 'snell' && !parts.some(p => p.startsWith('tfo='))) {
+            parts.push('tfo=true');
+        }
+    }
+
     return { proxyLine: parts.join(', ') };
 }
 
@@ -395,6 +404,7 @@ export function generateBuiltinSurgeConfig(nodeList, options = {}) {
         interval = 86400,
         skipCertVerify = false,
         enableUdp = false,
+        enableTfo = false,
         ruleLevel = 'std'
     } = options;
 
@@ -407,13 +417,10 @@ export function generateBuiltinSurgeConfig(nodeList, options = {}) {
     const results = [];
     const proxyNames = [];
 
-    for (const url of nodeUrls) {
-        const clashProxy = urlToClashProxy(url);
-        if (!clashProxy) continue;
+    // 转换为 Clash 代理对象
+    const proxies = urlsToClashProxies(nodeUrls, options);
 
-        if (skipCertVerify) clashProxy['skip-cert-verify'] = true;
-        if (enableUdp) clashProxy.udp = true;
-
+    for (const clashProxy of proxies) {
         const result = clashProxyToSurgeResult(clashProxy);
         if (result) {
             result.clashProxy = clashProxy; // 存储以保留元数据
