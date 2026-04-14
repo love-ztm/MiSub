@@ -466,11 +466,12 @@ export async function handleMisubRequest(context) {
     // 1. If 'nodes' format requested, return Base64 nodes directly (DataSource for external converters)
     if (targetFormat === 'nodes') {
         const contentToEncode = isProfileExpired ? (DEFAULT_EXPIRED_NODE + '\n') : combinedNodeList;
+        // [兼容性优化] 绝大多数第三方转换后端默认期望收到 Base64 编码的订阅内容
         return new Response(base64EncodeUtf8(contentToEncode), { 
             headers: { 
                 "Content-Type": "text/plain; charset=utf-8", 
                 'Cache-Control': 'no-store, no-cache',
-                'X-MiSub-Mode': 'node-export'
+                'X-MiSub-Mode': 'node-export-base64'
             } 
         });
     }
@@ -485,6 +486,14 @@ export async function handleMisubRequest(context) {
         const dataSourceUrl = new URL(request.url);
         dataSourceUrl.searchParams.set('target', 'nodes');
         dataSourceUrl.searchParams.set('engine', 'builtin');
+
+        // [关键修复] 确保后端拉取数据时包含身份令牌，否则会报 401 (No nodes found)
+        // 优先使用 URL 中已有的令牌，如果没有则使用配置中的管理员令牌（假设是管理员在操作）
+        if (!dataSourceUrl.searchParams.has('token') && !dataSourceUrl.searchParams.has('clash')) {
+            const authToken = token || config.mytoken;
+            if (authToken) dataSourceUrl.searchParams.set('token', authToken);
+        }
+
         externalUrl.searchParams.set('url', dataSourceUrl.toString());
         
         // Map Boolean Flags
@@ -506,7 +515,15 @@ export async function handleMisubRequest(context) {
         // Add File Name
         externalUrl.searchParams.set('filename', subName);
 
-        return Response.redirect(externalUrl.toString(), 302);
+        // [重要修复] 使用手动构建出的 302 响应，以确保头部是可变的 (Mutable)
+        return new Response(null, {
+            status: 302,
+            headers: {
+                'Location': externalUrl.toString(),
+                'Cache-Control': 'no-store, no-cache',
+                'X-MiSub-Mode': 'external-redirect-v2'
+            }
+        });
     }
 
     if (targetFormat === 'base64') {
