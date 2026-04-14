@@ -95,7 +95,8 @@ function parseVlessUrl(url) {
             type: 'vless',
             server,
             port,
-            uuid
+            uuid,
+            cipher: params.get('encryption') || 'none'
         };
 
         // 网络类型

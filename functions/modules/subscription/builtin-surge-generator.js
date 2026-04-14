@@ -236,9 +236,36 @@ function clashProxyToSurgeResult(proxy) {
         if (proxy.udp) parts.push('udp-relay=true');
         if (type === 'socks5-tls') appendTlsParams(parts, proxy);
     } else if (type === 'vless') {
-        // Surge 不原生支持 VLESS 协议，跳过
-        console.debug(`[BuiltinSurge] 跳过不支持的 VLESS 节点: ${name}`);
-        return null;
+        // 解锁 VLESS 支持，即使原生 Surge 不直接解析，也能通过第三方模块或特定版本使用，且防止节点丢失
+        parts.push(`${name} = vless`);
+        parts.push(server);
+        parts.push(String(port));
+        parts.push(`username=${proxy.uuid || ''}`);
+
+        // TLS / Reality 支持
+        const isReality = proxy.security === 'reality' || !!proxy['reality-opts'];
+        if (proxy.tls || isReality) {
+            parts.push('tls=true');
+            if (isReality) {
+                parts.push('reality=true');
+                const realityOpts = proxy['reality-opts'] || {};
+                if (realityOpts['public-key']) parts.push(`public-key=${surgeQuote(realityOpts['public-key'])}`);
+                if (realityOpts['short-id']) parts.push(`short-id=${surgeQuote(realityOpts['short-id'])}`);
+            }
+        }
+
+        // 传输层支持 (虽然 Surge 原生支持有限，但保留元数据)
+        if (proxy.network === 'ws') {
+            parts.push('ws=true');
+            const wsOpts = proxy['ws-opts'] || proxy.wsOpts;
+            if (wsOpts?.path) parts.push(`ws-path=${wsOpts.path}`);
+            if (wsOpts?.headers?.Host) parts.push(`ws-headers=Host:${wsOpts.headers.Host}`);
+        } else if (proxy.network === 'grpc') {
+            const grpcOpts = proxy['grpc-opts'] || proxy.grpcOpts;
+            if (grpcOpts?.['grpc-service-name']) parts.push(`grpc-service-name=${surgeQuote(grpcOpts['grpc-service-name'])}`);
+        }
+
+        appendTlsParams(parts, proxy);
     } else {
         // 不支持的类型
         return null;

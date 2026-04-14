@@ -11,22 +11,12 @@ export const useVersionStore = defineStore('version', () => {
     const showUpdateNotice = ref(false);
     const upstreamRepo = 'imzyb/MiSub';
 
-    // 本地更新日志 (v2.6.0)
-    const localChangelog = `✨ **核心特性 - 规则引擎重构**
-- **全节点覆盖逻辑**：优化了地区识别算法，所有未匹配地区的节点均会归类至“🌍 其他地区”，彻底解决了以往部分节点在内置规则下“失踪”的问题。
-- **三维监控策略组**：在内置规则中引入了“♻️ 全球自动”、“🔯 故障转移”与“👋 手动切换”三大核心策略组，提升了在不同网络波动环境下的适应性。
-- **嵌套自动化深度分组**：重构了地区分组层级，现在每个地区组（如“🇭🇰 香港节点”）均内置二级“⚡ 自动选择”子组，实现“先自动、后手动”的专业化路由逻辑。
-
-🎨 **预设模板库扩充**
-- **AI 开发者专用**：新增针对 OpenAI、Claude 等 AI 服务的深度优化模板，提供更稳定的连接保持能力。
-- **游戏竞技优化**：新增针对各主流竞技平台（Steam, Epic, Sony 等）的专项分流模板，大幅降低联机延迟。
-
-🚀 **性能与稳定性**
-- **Sing-Box 适配优化**：精细化了 Sing-box 的 outbound 映射逻辑，降低了自动测速带来的设备能耗。
-- **单 KV 模式缓存修复**：彻底修复了单 KV 环境下的 UI 缓存回退 Bug，并优化了边缘节点响应头。
-
-🔧 **UI/UX 增强**
-- **搜索与交互**：修复了仪表盘搜索崩溃问题，并为各层级选择器增加了直观的 Emoji 引导。`;
+    // 本地更新日志 (v2.6.2)
+    const localChangelog = `🚀 **协议兼容性大升级 - 完美支持 VLESS Reality & xHTTP**
+- **Quantumult X 适配修复**：深度重构了 QX 的 VLESS 节点生成逻辑，彻底解决了高阶协议（Reality、xHTTP、gRPC）节点在 QX 中丢失的问题，并支持了自动降级映射（将 xHTTP 平滑降级为可被识别的 HTTP Obfs）。
+- **Surge VLESS 解锁**：解除了 Surge 生成器中对 VLESS 的强制过滤，现在 Surge 订阅也可以完整输出支持 Reality 及标准结构的 VLESS 节点配置（适用于现代版本、代理转发链及第三方插件生态）。
+- **底层解析器增强**：优化了节点 URI 的容错解析逻辑，现在能够完美提取并传递 \`xhttp-opts\` 与 \`reality-public-key\` 等高级边缘参数至各客户端生成器。
+- **全客户端普查**：确认并强化了 Clash(Mihomo)、Loon、Sing-box 等对 xHTTP 及 Reality 协议的兼容性，确保“只要生成，就能连接”。`;
 
     // --- Getters ---
     const hasUpdate = computed(() => {
