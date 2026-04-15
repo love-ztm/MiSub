@@ -11,12 +11,12 @@ export const useVersionStore = defineStore('version', () => {
     const showUpdateNotice = ref(false);
     const upstreamRepo = 'imzyb/MiSub';
 
-    // 本地更新日志 (v2.6.2)
-    const localChangelog = `🚀 **协议兼容性大升级 - 完美支持 VLESS Reality & xHTTP**
-- **Quantumult X 适配修复**：深度重构了 QX 的 VLESS 节点生成逻辑，彻底解决了高阶协议（Reality、xHTTP、gRPC）节点在 QX 中丢失的问题，并支持了自动降级映射（将 xHTTP 平滑降级为可被识别的 HTTP Obfs）。
-- **Surge VLESS 解锁**：解除了 Surge 生成器中对 VLESS 的强制过滤，现在 Surge 订阅也可以完整输出支持 Reality 及标准结构的 VLESS 节点配置（适用于现代版本、代理转发链及第三方插件生态）。
-- **底层解析器增强**：优化了节点 URI 的容错解析逻辑，现在能够完美提取并传递 \`xhttp-opts\` 与 \`reality-public-key\` 等高级边缘参数至各客户端生成器。
-- **全客户端普查**：确认并强化了 Clash(Mihomo)、Loon、Sing-box 等对 xHTTP 及 Reality 协议的兼容性，确保“只要生成，就能连接”。`;
+    // 本地更新日志 (v2.6.4)
+    const localChangelog = `✨ **推送 Bot 深度兼容 & UI 视觉对齐**
+- **Telegram Bot 存储重构**：针对 D1 数据库行级存储模式进行了深度重构。解决了 Bot 无法获取订阅组进行绑定的顽固故障，确保 Bot 与 Web 端数据 100% 同步。
+- **设置面板 UI 视觉对齐**：统一了全局设置页面的所有表单高度、Label 字阶及内容字号。
+- **布局逻辑优化**：将“通用节点设置”重组为 2x2 网格布局，优化了移动端与 PC 端的视觉重心分布。
+- **协议稳定性提升**：改进了手动节点前缀与国旗 EMOJI 的处理逻辑，增强了配置生成的健壮性。`;
 
     // --- Getters ---
     const hasUpdate = computed(() => {
