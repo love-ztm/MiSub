@@ -465,20 +465,32 @@ export async function handleMisubRequest(context) {
     // [Support] External Subconverter Logic
     // 1. If 'nodes' format requested, return Base64 nodes directly (DataSource for external converters)
     if (targetFormat === 'nodes') {
-        const contentToEncode = isProfileExpired ? (DEFAULT_EXPIRED_NODE + '\n') : combinedNodeList;
-        // [兼容性优化] 绝大多数第三方转换后端默认期望收到 Base64 编码的订阅内容
-        return new Response(base64EncodeUtf8(contentToEncode), { 
+        const contentToSend = isProfileExpired ? (DEFAULT_EXPIRED_NODE + '\n') : combinedNodeList;
+        // [兼容性优化] 尽管 Base64 是订阅标准，但对于用作 subconverter 数据源的基础节点列表，
+        // 返回明文 URI 列表（一行一个）具有最佳的跨版本兼容性，特别是对于一些正则引擎较弱的后端。
+        return new Response(contentToSend, { 
             headers: { 
                 "Content-Type": "text/plain; charset=utf-8", 
                 'Cache-Control': 'no-store, no-cache',
-                'X-MiSub-Mode': 'node-export-base64'
+                'X-MiSub-Mode': 'node-export-plain'
             } 
         });
     }
 
     // 2. If external mode active, build the redirect URL and return 302
     if (isExternalMode && targetFormat !== 'base64') {
-        const backend = url.searchParams.get('backend') || profileSub.backend || globalSub.defaultBackend || "https://sub.id9.cc/sub?";
+        let backend = url.searchParams.get('backend') || profileSub.backend || globalSub.defaultBackend || "https://sub.id9.cc/sub?";
+        
+        // [加固] 防止 UI 标签泄漏到配置中（例如出现 "subconverter 后端" 字样）
+        if (typeof backend === 'string' && (backend.includes('后端') || backend.includes('参数'))) {
+            backend = "https://subapi.cmliussss.net/sub?";
+        }
+
+        // [自动纠错] 如果地址不带 http/https 协议，自动补全，防止 URL 构造失败
+        if (backend && typeof backend === 'string' && !backend.startsWith('http://') && !backend.startsWith('https://')) {
+            backend = 'http://' + backend;
+        }
+
         const externalUrl = new URL(backend);
         externalUrl.searchParams.set('target', targetFormat.includes('&') ? targetFormat.split('&')[0] : targetFormat);
         
@@ -488,9 +500,9 @@ export async function handleMisubRequest(context) {
         dataSourceUrl.searchParams.set('engine', 'builtin');
 
         // [关键修复] 确保后端拉取数据时包含身份令牌，否则会报 401 (No nodes found)
-        // 优先使用 URL 中已有的令牌，如果没有则使用配置中的管理员令牌（假设是管理员在操作）
-        if (!dataSourceUrl.searchParams.has('token') && !dataSourceUrl.searchParams.has('clash')) {
-            const authToken = token || config.mytoken;
+        // 恢复显式注入逻辑，以确保在所有路径下第三方转换后端都能成功访问内部数据源
+        if (!dataSourceUrl.searchParams.has('token')) {
+            const authToken = token || currentProfile?.token || config.mytoken;
             if (authToken) dataSourceUrl.searchParams.set('token', authToken);
         }
 
@@ -509,6 +521,7 @@ export async function handleMisubRequest(context) {
 
         // Pass Remote Config if applicable
         if (templateUrl && templateSource.kind === 'remote') {
+            // [回滚] 恢复使用 URL 传递配置。虽然 Base64 更可靠，但并非所有后端都支持 base64: 前缀
             externalUrl.searchParams.set('config', templateSource.value);
         }
 

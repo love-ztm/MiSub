@@ -120,11 +120,23 @@ function parseAclProxyGroupLine(line) {
             }
             continue;
         }
-        if (part.startsWith('(') && part.endsWith(')')) {
-            filters.push(part.slice(1, -1));
+        // 支持 ACL4SSR 正则过滤器，如 .* 或 (HK|TW|SG)
+        if (part === '.*' || (part.startsWith('(') && part.endsWith(')'))) {
+            const filterValue = part === '.*' ? '.*' : part.slice(1, -1);
+            filters.push(filterValue);
             continue;
         }
         if (part === ',') continue;
+        
+        // 兜底：如果既不是特殊的 [] 开头也不是已知格式，尝试作为成员或正则识别
+        if (part && !part.includes('=')) {
+            // 如果包含正则特殊字符，视为过滤器
+            if (/[*+[\]?|]/.test(part)) {
+                filters.push(part);
+            } else {
+                members.push(part);
+            }
+        }
     }
 
     return { name, type, members, filters, options };
