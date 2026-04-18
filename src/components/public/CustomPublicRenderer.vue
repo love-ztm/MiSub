@@ -1,9 +1,11 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { useThemeStore } from '../../stores/theme.js';
 import { parseCustomPageSource } from '../../utils/custom-page-source.js';
 
 const route = useRoute();
+const themeStore = useThemeStore();
 
 const props = defineProps({
   content: {
@@ -76,7 +78,7 @@ const renderedHtml = computed(() => {
   }
   
   // 2. 组件占位符替换 (转换为 data-slot div)
-  const placeholders = ['profiles', 'announcements', 'hero', 'guestbook'];
+  const placeholders = ['profiles', 'announcement', 'announcements', 'hero', 'guestbook', 'theme_toggle'];
   placeholders.forEach(p => {
     // 使用 gi 确保不区分大小写
     const regex = new RegExp(`{{\\s*${p}\\s*}}`, 'gi');
@@ -201,6 +203,19 @@ watch(() => route.path, (newPath, oldPath) => {
 
       <Teleport v-if="hasSlot('guestbook')" to='[data-slot="guestbook"]' :disabled="disableTeleport">
         <slot name="guestbook"></slot>
+      </Teleport>
+
+      <Teleport v-if="hasSlot('theme_toggle')" to='[data-slot="theme_toggle"]' :disabled="disableTeleport">
+        <button @click="themeStore.toggleTheme" 
+                class="theme-toggle-btn p-2 rounded-full border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-black/40 backdrop-blur-md shadow-sm transition-all active:scale-90"
+                :title="themeStore.theme === 'dark' ? '切换到浅色' : '切换到深色'">
+          <svg v-if="themeStore.theme === 'dark'" class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          <svg v-else class="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        </button>
       </Teleport>
     </template>
   </div>
