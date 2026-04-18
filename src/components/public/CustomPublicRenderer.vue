@@ -1,7 +1,9 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { onBeforeRouteLeave } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { parseCustomPageSource } from '../../utils/custom-page-source.js';
+
+const route = useRoute();
 
 const props = defineProps({
   content: {
@@ -15,6 +17,10 @@ const props = defineProps({
   config: {
     type: Object,
     default: () => ({})
+  },
+  profiles: {
+    type: Array,
+    default: () => []
   }
 });
 
@@ -22,6 +28,7 @@ const styleId = 'custom-public-page-styles';
 const stylesheetDataAttr = 'data-custom-page-stylesheet';
 const scriptDataAttr = 'data-custom-page-script';
 const disableTeleport = ref(false);
+const isReady = ref(false);
 
 const removeStyles = () => {
   const styleEl = document.getElementById(styleId);
@@ -53,9 +60,26 @@ const escapeHtml = (value) => {
 const renderedHtml = computed(() => {
   let html = parsedSource.value.html || '';
   
+  // 1. 文本占位符替换
+  const nodeCount = props.profiles.reduce((sum, p) => sum + (p.subscriptionCount || 0) + (p.manualNodeCount || 0), 0);
+  const textVars = {
+    version: '2.6.4',
+    title: props.config?.hero?.title1 || '',
+    description: props.config?.hero?.description || '',
+    profile_count: props.profiles.length,
+    node_count: nodeCount
+  };
+  
+  for (const [key, val] of Object.entries(textVars)) {
+    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'gi');
+    html = html.replace(regex, escapeHtml(val));
+  }
+  
+  // 2. 组件占位符替换 (转换为 data-slot div)
   const placeholders = ['profiles', 'announcements', 'hero', 'guestbook'];
   placeholders.forEach(p => {
-    const regex = new RegExp(`{{\\s*${p}\\s*}}`, 'g');
+    // 使用 gi 确保不区分大小写
+    const regex = new RegExp(`{{\\s*${p}\\s*}}`, 'gi');
     html = html.replace(regex, `<div data-slot="${p}"></div>`);
   });
   
@@ -66,6 +90,13 @@ const renderedHtml = computed(() => {
 const hasSlot = (name) => {
   return renderedHtml.value.includes(`data-slot="${name}"`);
 };
+
+// 监听内容变化，确保 DOM 更新后才开启 Teleport
+watch(renderedHtml, async () => {
+  isReady.value = false;
+  await nextTick();
+  isReady.value = true;
+}, { immediate: true });
 
 const injectStyles = () => {
   let styleEl = document.getElementById(styleId);
@@ -138,11 +169,12 @@ onUnmounted(() => {
   removeScripts();
 });
 
-onBeforeRouteLeave(async () => {
-  // 路由切走前先禁用 Teleport，让插槽内容回到当前组件树，
-  // 避免目标占位符先被移除时触发 Vue 在卸载 Teleport 时访问空节点。
-  disableTeleport.value = true;
-  await nextTick();
+// 监听路由变化，在切走前提前关闭 Teleport，防止 Vue 在销毁 DOM 时因找不到目标节点而报错
+watch(() => route.path, (newPath, oldPath) => {
+  if (oldPath && newPath !== oldPath) {
+    isReady.value = false;
+    disableTeleport.value = true;
+  }
 });
 
 </script>
@@ -153,21 +185,24 @@ onBeforeRouteLeave(async () => {
     <div v-html="renderedHtml" class="custom-html-container"></div>
 
     <!-- 使用 Teleport 将原始组件插槽传送到对应的占位符 div 中 -->
-    <Teleport v-if="hasSlot('profiles')" to='[data-slot="profiles"]' :disabled="disableTeleport">
-      <slot name="profiles"></slot>
-    </Teleport>
+    <!-- 仅在 isReady 为 true 时挂载，确保 data-slot 节点已存在于 DOM -->
+    <template v-if="isReady">
+      <Teleport v-if="hasSlot('profiles')" to='[data-slot="profiles"]' :disabled="disableTeleport">
+        <slot name="profiles"></slot>
+      </Teleport>
 
-    <Teleport v-if="hasSlot('announcements')" to='[data-slot="announcements"]' :disabled="disableTeleport">
-      <slot name="announcements"></slot>
-    </Teleport>
+      <Teleport v-if="hasSlot('announcements')" to='[data-slot="announcements"]' :disabled="disableTeleport">
+        <slot name="announcements"></slot>
+      </Teleport>
 
-    <Teleport v-if="hasSlot('hero')" to='[data-slot="hero"]' :disabled="disableTeleport">
-      <slot name="hero"></slot>
-    </Teleport>
+      <Teleport v-if="hasSlot('hero')" to='[data-slot="hero"]' :disabled="disableTeleport">
+        <slot name="hero"></slot>
+      </Teleport>
 
-    <Teleport v-if="hasSlot('guestbook')" to='[data-slot="guestbook"]' :disabled="disableTeleport">
-      <slot name="guestbook"></slot>
-    </Teleport>
+      <Teleport v-if="hasSlot('guestbook')" to='[data-slot="guestbook"]' :disabled="disableTeleport">
+        <slot name="guestbook"></slot>
+      </Teleport>
+    </template>
   </div>
 </template>
 

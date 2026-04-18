@@ -53,15 +53,14 @@ onMounted(() => {
 
 <template>
     <Transition name="fade">
-        <div v-if="isVisible" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
-            <div @click="toggleExpand"
-                class="relative misub-radius-lg p-4 shadow-sm border transition-all duration-300 cursor-pointer hover:shadow-md group"
-                :class="{
-                    'bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-800': announcement.type === 'info',
-                    'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-800': announcement.type === 'success',
-                    'bg-yellow-50 border-yellow-100 dark:bg-yellow-900/20 dark:border-yellow-800': announcement.type === 'warning',
-                    'bg-red-50 border-red-100 dark:bg-red-900/20 dark:border-red-800': announcement.type === 'error'
-                }">
+        <div v-if="isVisible" @click="toggleExpand"
+            class="relative misub-radius-lg p-4 shadow-sm border transition-all duration-300 cursor-pointer hover:shadow-md group announcement-card"
+            :class="{
+                'bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-800': announcement.type === 'info',
+                'bg-green-50 border-green-100 dark:bg-green-900/20 dark:border-green-800': announcement.type === 'success',
+                'bg-yellow-50 border-yellow-100 dark:bg-yellow-900/20 dark:border-yellow-800': announcement.type === 'warning',
+                'bg-red-50 border-red-100 dark:bg-red-900/20 dark:border-red-800': announcement.type === 'error'
+            }">
 
                 <div class="flex items-center gap-4">
                     <!-- Icon -->
@@ -122,7 +121,6 @@ onMounted(() => {
                         class="mt-4 text-xs text-gray-400 dark:text-gray-500 flex justify-end">
                         发布时间: {{ new Date(announcement.updatedAt).toLocaleString() }}
                     </div>
-                </div>
             </div>
         </div>
     </Transition>
