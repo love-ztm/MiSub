@@ -106,7 +106,7 @@ function opRename(nodes, params) {
         }
     }
 
-    if (template?.enabled && template.text) {
+    if (template?.enabled && template.template) {
         const counters = new Map();
         const scope = template.indexScope || template.scope || 'region'; // 默认按地区分组计数，符合用户直觉
 
@@ -130,10 +130,10 @@ function opRename(nodes, params) {
                 emoji: enriched.emoji,
                 server: r.server,
                 port: r.port,
-                index: groupIndex + (template.offset || 1) - 1,
-                globalIndex: index + (template.offset || 1)
+                index: groupIndex + (Number(template.offset || template.indexStart) || 1) - 1,
+                globalIndex: index + (Number(template.offset || template.indexStart) || 1)
             };
-            const newName = NodeUtils.renderTemplate(template.text, vars, r);
+            const newName = NodeUtils.renderTemplate(template.template, vars, r);
             
             if (newName !== r.name) {
                 return {
@@ -173,6 +173,13 @@ async function opScript(nodes, params, context) {
     if (!scriptCode) return nodes;
 
     try {
+        // [诊断埋点] 如果进入了脚本算子，强行在名字前加标，确认链路是否通畅
+        nodes.forEach(n => {
+            if (!n.name.includes('[算子已启动]')) {
+                n.name = '[算子已启动] ' + n.name;
+            }
+        });
+
         // [审计增强] 脚本执行前自动补全地理元数据，确保 $proxies 包含 regionZh 等信息
         const enrichedNodes = nodes.map(r => NodeUtils.ensureRegionInfo(r, true));
         
@@ -193,30 +200,55 @@ async function opScript(nodes, params, context) {
             }
         };
 
-        const wrapper = `
-            return (async () => {
-                const $proxies = Array.from(arguments[0]);
-                const $context = arguments[1];
-                const { $utils } = arguments[2];
-                
-                ${scriptCode}
+        // 智能包装：如果用户没写 operator 函数，或者写得不规范，我们自动补全环境
+        let finalScript = scriptCode.trim();
+        if (!finalScript.includes('function operator') && !finalScript.includes('const operator')) {
+            finalScript = `async function operator($proxies, $context) { \n ${finalScript} \n }`;
+        } else {
+            // 如果用户写了函数但可能没写完（比如漏了最后的大括号），我们尝试追加一个
+            const openBraces = (finalScript.match(/\{/g) || []).length;
+            const closeBraces = (finalScript.match(/\}/g) || []).length;
+            if (openBraces > closeBraces) {
+                finalScript += '\n'.repeat(openBraces - closeBraces) + '}'.repeat(openBraces - closeBraces);
+            }
+        }
 
-                if (typeof operator === 'function') {
-                    const res = await operator($proxies, $context);
-                    // 兼容返回 { proxies: [] } 或 { nodes: [] } 的脚本
-                    if (res && !Array.isArray(res)) {
-                        return res.proxies || res.nodes || $proxies;
-                    }
-                    return res;
-                }
-                return $proxies;
-            })();
+        const wrapper = `
+            ${finalScript}
+
+            if (typeof operator === 'function') {
+                return await operator($proxies, $context);
+            }
+            return $proxies;
         `;
 
         const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-        const runner = new AsyncFunction(wrapper);
-        const result = await runner(enrichedNodes, context, scriptEnv);
-        return Array.isArray(result) ? result : nodes;
+        const runner = new AsyncFunction('$proxies', '$context', '$utils', wrapper);
+
+        const processedNodes = enrichedNodes.map(n => {
+            // 归一化处理：将各种相似的圆点统一，确保正则匹配成功
+            if (n.name) n.name = n.name.replace(/[·•・∙]/g, '·');
+            
+            n.regionzh = n.regionZh;
+            n.region_zh = n.regionZh;
+            return n;
+        });
+
+        const result = await runner(processedNodes, context, scriptEnv.$utils);
+        
+        // 核心同步：强制将脚本的修改同步到所有关键字段，确保下游算子识别
+        if (Array.isArray(result)) {
+            return result.map(n => {
+                // 处理可能存在的 Proxy 包装（虽然目前已移除，但保留防御性）
+                const target = n.__target || n;
+                if (target.name && target.name !== target.originalName) {
+                    target.url = NodeUtils.setNodeName(target.url, target.protocol, target.name);
+                    if (target.metadata) target.metadata.cleanName = target.name;
+                }
+                return target;
+            });
+        }
+        return nodes;
     } catch (e) {
         console.error('[Operator] Script execution failed:', e);
         return nodes;
